@@ -98,6 +98,19 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Ensure TF backend resources exist
+        run: |
+          # ensure the resource group exists (change location if needed)
+          az group show -n "${{ secrets.TFSTATE_RG_NAME }}" --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            || az group create -n "${{ secrets.TFSTATE_RG_NAME }}" -l westeurope --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+          # ensure the storage account exists (name must be globally unique and lowercase)
+          az storage account show -n "${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" -g "${{ secrets.TFSTATE_RG_NAME }}" --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            || az storage account create -n "${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" -g "${{ secrets.TFSTATE_RG_NAME }}" --sku Standard_LRS --kind StorageV2 --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+          # create container (requires storage account key)
+          ACCOUNT_KEY=$(az storage account keys list -g "${{ secrets.TFSTATE_RG_NAME }}" -n "${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" --query "[0].value" -o tsv)
+          az storage container create --name "${{ secrets.TFSTATE_CONTAINER_NAME }}" --account-name "${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" --account-key "$ACCOUNT_KEY"
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
       - name: Terraform init & apply
