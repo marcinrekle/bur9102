@@ -1,4 +1,4 @@
-name: Build and Deploy (Docker Hub → Azure via Terraform)
+name: Build, Test and Push Docker Image
 
 on:
   push:
