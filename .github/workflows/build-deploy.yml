@@ -13,7 +13,7 @@ jobs:
   test-image:
     runs-on: ubuntu-latest
     env:
-      IMAGE_NAME: marak89/bur9102a
+      IMAGE_NAME: marcinrekle/bur9102a
 
     steps:
       - name: Checkout repo
