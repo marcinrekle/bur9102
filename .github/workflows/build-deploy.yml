@@ -121,4 +121,5 @@ jobs:
             -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER_NAME }}" \
             -backend-config="key=${{ secrets.TFSTATE_KEY }}"
           terraform -chdir=infra/app apply -auto-approve \
+            -var="app_name=${{ secrets.AZURE_APP_NAME }}" \
             -var="docker_tag=${{ needs.build-and-push.outputs.image_tag }}"
