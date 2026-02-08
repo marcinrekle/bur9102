@@ -9,6 +9,16 @@ import {
   id = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/resourceGroups/${var.tfstate_rg_name}"
 }
 
+import {
+  to = azurerm_storage_account.tfstate
+  id = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/resourceGroups/${var.tfstate_rg_name}/providers/Microsoft.Storage/storageAccounts/${var.storage_account_name}"
+}
+
+import {
+  to = azurerm_storage_container.tfstate
+  id = "https://${var.storage_account_name}.blob.core.windows.net/${var.container_name}"
+}
+
 resource "azurerm_resource_group" "tfstate" {
   name     = var.tfstate_rg_name
   location = var.location
