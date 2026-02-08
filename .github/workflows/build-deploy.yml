@@ -83,43 +83,75 @@ jobs:
 
   deploy-azure:
     runs-on: ubuntu-latest
-    needs: [build-and-push]
+    needs: [ build-and-push ]
     env:
+      TF_IN_AUTOMATION: "true"
+      IMAGE_NAME: marcinrekle/bur9102a
+
+      # AzureRM auth przez OIDC (Terraform provider + backend)
       ARM_USE_OIDC: "true"
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
       - name: Azure login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Ensure TF backend resources exist
-        run: |
-          # ensure the resource group exists (change location if needed)
-          az group show -n "${{ secrets.TFSTATE_RG_NAME }}" --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            || az group create -n "${{ secrets.TFSTATE_RG_NAME }}" -l westeurope --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
 
-          # ensure the storage account exists (name must be globally unique and lowercase)
-          az storage account show -n "${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" -g "${{ secrets.TFSTATE_RG_NAME }}" --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            || az storage account create -n "${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" -g "${{ secrets.TFSTATE_RG_NAME }}" --sku Standard_LRS --kind StorageV2 --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
-
-          # create container (requires storage account key)
-          ACCOUNT_KEY=$(az storage account keys list -g "${{ secrets.TFSTATE_RG_NAME }}" -n "${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" --query "[0].value" -o tsv)
-          az storage container create --name "${{ secrets.TFSTATE_CONTAINER_NAME }}" --account-name "${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" --account-key "$ACCOUNT_KEY"
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-      - name: Terraform init & apply
+        with:
+          terraform_wrapper: false
+
+      # (1) Bootstrap: tworzymy Storage Account + Container na tfstate
+      - name: Terraform init (bootstrap)
+        run: terraform -chdir=infra/bootstrap init -input=false
+
+      - name: Terraform apply (bootstrap)
+        run: |
+          terraform -chdir=infra/bootstrap apply -auto-approve -input=false \
+            -var="location=${{ secrets.AZURE_LOCATION }}" \
+            -var="tfstate_rg_name=${{ secrets.TFSTATE_RG_NAME }}" \
+            -var="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" \
+            -var="container_name=${{ secrets.TFSTATE_CONTAINER_NAME }}"
+
+      # (2) Deploy aplikacji: init z backendem remote
+      - name: Terraform init (app, remote backend)
         run: |
           terraform -chdir=infra/app init -input=false \
             -backend-config="resource_group_name=${{ secrets.TFSTATE_RG_NAME }}" \
             -backend-config="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" \
             -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER_NAME }}" \
-            -backend-config="key=${{ secrets.TFSTATE_KEY }}"
-          terraform -chdir=infra/app apply -auto-approve \
+            -backend-config="key=${{ secrets.TFSTATE_KEY }}" \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true" \
+            -backend-config="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+            -backend-config="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -backend-config="client_id=${{ secrets.AZURE_CLIENT_ID }}"
+
+      - name: Terraform plan (app)
+        run: |
+          terraform -chdir=infra/app plan -input=false \
+            -var="location=${{ secrets.AZURE_LOCATION }}" \
+            -var="rg_name=${{ secrets.AZURE_APP_RG_NAME }}" \
             -var="app_name=${{ secrets.AZURE_APP_NAME }}" \
+            -var="plan_sku_name=${{ secrets.AZURE_PLAN_SKU }}" \
+            -var="docker_image=${{ env.IMAGE_NAME }}" \
+            -var="docker_tag=${{ needs.build-and-push.outputs.image_tag }}"
+
+      - name: Terraform apply (app)
+        run: |
+          terraform -chdir=infra/app apply -auto-approve -input=false \
+            -var="location=${{ secrets.AZURE_LOCATION }}" \
+            -var="rg_name=${{ secrets.AZURE_APP_RG_NAME }}" \
+            -var="app_name=${{ secrets.AZURE_APP_NAME }}" \
+            -var="plan_sku_name=${{ secrets.AZURE_PLAN_SKU }}" \
+            -var="docker_image=${{ env.IMAGE_NAME }}" \
             -var="docker_tag=${{ needs.build-and-push.outputs.image_tag }}"
