@@ -1,5 +1,12 @@
+data "azurerm_client_config" "current" {}
+
 provider "azurerm" {
   features {}
+}
+
+import {
+  to = azurerm_resource_group.tfstate
+  id = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/resourceGroups/${var.tfstate_rg_name}"
 }
 
 resource "azurerm_resource_group" "tfstate" {
